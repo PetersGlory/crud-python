@@ -1,14 +1,44 @@
-from fastapi import FastAPI, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi import FastAPI, Depends, HTTPException, status, Request
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 from datetime import datetime, timedelta
 from passlib.context import CryptContext
-import jwt
-from jwt import PyJWTError
+from jose import JWTError, jwt
 
-# Initialize FastAPI app
-app = FastAPI(title="User CRUD API", version="1.0.0")
+from fastapi.openapi.utils import get_openapi
+
+# Initialize FastAPI app with detailed Swagger docs and description
+app = FastAPI(
+    title="User CRUD API",
+    version="1.0.0",
+    description="""
+    ## User CRUD API
+
+    This API allows you to:
+
+    - Register a new user
+    - Login to receive a JWT access token
+    - List, retrieve, update, and delete user records (authentication required)
+    - Retrieve your own profile
+    - Perform health checks
+
+    **Authorization:**  
+    Endpoints except `/register`, `/login`, and `/health` require authentication with a Bearer token in the `Authorization` header.  
+    To authorize in Swagger UI, click "Authorize" and enter:  
+    ```
+    Bearer <your-access-token>
+    ```
+
+    You may obtain an access token by sending a POST request to `/login` with your credentials.
+
+    **Models:**
+    - **User:** id, email, full_name, created_at
+    - **UserCreate:** email, full_name, password
+    - **UserUpdate:** full_name, email (optional)
+
+    [Swagger UI](/docs) | [ReDoc](/redoc)
+    """
+)
 
 # JWT Configuration
 SECRET_KEY = "your-secret-key-change-this-in-production"
@@ -18,24 +48,40 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# OAuth2 scheme
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
-
 # ==================== Pydantic Models ====================
 
 class UserBase(BaseModel):
     email: EmailStr
     full_name: str
-    
+    class Config:
+        schema_extra = {
+            "example": {
+                "email": "user@example.com",
+                "full_name": "Jane Doe"
+            }
+        }
 
 class UserCreate(UserBase):
     password: str
-
+    class Config:
+        schema_extra = {
+            "example": {
+                "email": "user@example.com",
+                "full_name": "Jane Doe",
+                "password": "verysecretpassword"
+            }
+        }
 
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     email: Optional[EmailStr] = None
-
+    class Config:
+        schema_extra = {
+            "example": {
+                "full_name": "Jane Doe II",
+                "email": "newuser@example.com"
+            }
+        }
 
 class User(UserBase):
     id: int
@@ -43,25 +89,42 @@ class User(UserBase):
     
     class Config:
         from_attributes = True
-
+        schema_extra = {
+            "example": {
+                "id": 1,
+                "email": "user@example.com",
+                "full_name": "Jane Doe",
+                "created_at": "2024-01-01T00:00:00"
+            }
+        }
 
 class UserInDB(User):
     hashed_password: str
 
-
 class Token(BaseModel):
     access_token: str
     token_type: str
-
+    class Config:
+        schema_extra = {
+            "example": {
+                "access_token": "eyJhbGciOi...",
+                "token_type": "bearer"
+            }
+        }
 
 class TokenData(BaseModel):
     email: Optional[str] = None
 
-
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
-
+    class Config:
+        schema_extra = {
+            "example": {
+                "email": "user@example.com",
+                "password": "verysecretpassword"
+            }
+        }
 
 # ==================== Mock Database ====================
 # In production, replace this with a real database (SQLAlchemy, MongoDB, etc.)
@@ -69,18 +132,21 @@ class LoginRequest(BaseModel):
 users_db = {}
 user_id_counter = 1
 
-
 # ==================== Helper Functions ====================
 
 def hash_password(password: str) -> str:
-    """Hash a password using bcrypt"""
+    """Hash a password using bcrypt, limiting to 72 UTF-8 bytes"""
+    password_bytes = password.encode("utf-8")
+    if len(password_bytes) > 72:
+        raise HTTPException(
+            status_code=400,
+            detail="Password too long (max 72 characters)"
+        )
     return pwd_context.hash(password)
-
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password against its hash"""
     return pwd_context.verify(plain_password, hashed_password)
-
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create a JWT access token"""
@@ -93,36 +159,51 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserInDB:
-    """Get the current authenticated user from JWT token"""
+async def get_current_user(request: Request) -> UserInDB:
+    """Get the current authenticated user from Bearer token in the Authorization header"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
+        detail="Invalid authentication credentials. Please log in again.",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.lower().startswith("bearer "):
+        raise credentials_exception
+
+    token = auth_header.split(" ", 1)[1]
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise credentials_exception
-        token_data = TokenData(email=email)
-    except PyJWTError:
+    except JWTError:
         raise credentials_exception
-    
-    user = next((u for u in users_db.values() if u["email"] == token_data.email), None)
-    if user is None:
-        raise credentials_exception
-    return UserInDB(**user)
 
+    email: str = payload.get("sub")
+    if not email or not isinstance(email, str):
+        raise credentials_exception
+
+    user = next((u for u in users_db.values() if u["email"].lower() == email.lower()), None)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or credentials invalid.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return UserInDB(**user)
 
 # ==================== Auth Endpoints ====================
 
-@app.post("/register", response_model=User, status_code=status.HTTP_201_CREATED)
+@app.post(
+    "/register",
+    response_model=User,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Authentication"],
+    summary="Register a new user",
+    description="Register a new user with email, full name, and password."
+)
 async def register(user: UserCreate):
     """
-    Register a new user
-    
+    Register a new user.
+
     - **email**: User's email address (must be unique)
     - **full_name**: User's full name
     - **password**: User's password (will be hashed)
@@ -157,14 +238,19 @@ async def register(user: UserCreate):
         created_at=new_user["created_at"]
     )
 
-
-@app.post("/login", response_model=Token)
+@app.post(
+    "/login",
+    response_model=Token,
+    tags=["Authentication"],
+    summary="User login & get JWT access token",
+    description="Login with email and password. Returns a JWT access token for authenticated requests.",
+)
 async def login(user_credentials: LoginRequest):
     """
-    Login with email and password
-    
-    Returns an access token for authenticated requests
-    
+    Login with email and password.
+
+    Returns an access token for authenticated requests.
+
     - **email**: User's email address
     - **password**: User's password
     """
@@ -185,15 +271,20 @@ async def login(user_credentials: LoginRequest):
     
     return {"access_token": access_token, "token_type": "bearer"}
 
-
 # ==================== CRUD Endpoints ====================
 
-@app.get("/users", response_model=List[User])
+@app.get(
+    "/users",
+    response_model=List[User],
+    summary="List all users",
+    description="Returns a list of all registered users. Requires authentication with Bearer token.",
+    tags=["Users"]
+)
 async def list_users(current_user: UserInDB = Depends(get_current_user)):
     """
-    List all users (requires authentication)
-    
-    Returns a list of all registered users
+    List all users (requires authentication with Bearer token)
+
+    Returns a list of all registered users.
     """
     return [
         User(
@@ -205,12 +296,17 @@ async def list_users(current_user: UserInDB = Depends(get_current_user)):
         for u in users_db.values()
     ]
 
-
-@app.get("/users/{user_id}", response_model=User)
+@app.get(
+    "/users/{user_id}",
+    response_model=User,
+    summary="Get user by ID",
+    description="Retrieve a specific user by ID. Requires authentication with Bearer token.",
+    tags=["Users"]
+)
 async def get_user(user_id: int, current_user: UserInDB = Depends(get_current_user)):
     """
-    Get a specific user by ID (requires authentication)
-    
+    Get a specific user by ID (requires authentication with Bearer token)
+
     - **user_id**: The ID of the user to retrieve
     """
     user = users_db.get(user_id)
@@ -228,11 +324,16 @@ async def get_user(user_id: int, current_user: UserInDB = Depends(get_current_us
         created_at=user["created_at"]
     )
 
-
-@app.get("/users/profile/me", response_model=User)
+@app.get(
+    "/users/profile/me",
+    response_model=User,
+    summary="Get current user's profile",
+    description="Retrieve the profile of the currently authenticated user. Requires authentication with Bearer token.",
+    tags=["Users"]
+)
 async def get_current_user_profile(current_user: UserInDB = Depends(get_current_user)):
     """
-    Get the current authenticated user's profile
+    Get the current authenticated user's profile. (requires authentication with Bearer token)
     """
     return User(
         id=current_user.id,
@@ -241,16 +342,21 @@ async def get_current_user_profile(current_user: UserInDB = Depends(get_current_
         created_at=current_user.created_at
     )
 
-
-@app.put("/users/{user_id}", response_model=User)
+@app.put(
+    "/users/{user_id}",
+    response_model=User,
+    summary="Update a user",
+    description="Update a user's information. Only allowed for their own user. Requires authentication with Bearer token.",
+    tags=["Users"]
+)
 async def update_user(
     user_id: int,
     user_update: UserUpdate,
     current_user: UserInDB = Depends(get_current_user)
 ):
     """
-    Update a user's information (requires authentication)
-    
+    Update a user's information (requires authentication with Bearer token)
+
     - **user_id**: The ID of the user to update
     - **full_name**: New full name (optional)
     - **email**: New email address (optional)
@@ -290,12 +396,17 @@ async def update_user(
         created_at=user["created_at"]
     )
 
-
-@app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete(
+    "/users/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a user",
+    description="Delete a user. Only allowed for their own user. Requires authentication with Bearer token.",
+    tags=["Users"]
+)
 async def delete_user(user_id: int, current_user: UserInDB = Depends(get_current_user)):
     """
-    Delete a user (requires authentication)
-    
+    Delete a user (requires authentication with Bearer token)
+
     - **user_id**: The ID of the user to delete
     """
     # Check if user exists
@@ -315,14 +426,58 @@ async def delete_user(user_id: int, current_user: UserInDB = Depends(get_current
     del users_db[user_id]
     return None
 
-
 # ==================== Health Check ====================
 
-@app.get("/health")
+@app.get(
+    "/health",
+    tags=["Health"],
+    summary="Health check endpoint",
+    description="Returns status and timestamp to confirm service is running."
+)
 async def health_check():
     """Health check endpoint"""
     return {"status": "ok", "timestamp": datetime.utcnow()}
 
+# Custom OpenAPI schema with tag descriptions and security
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title="User CRUD API",
+        version="1.0.0",
+        description=app.description,
+        routes=app.routes,
+        tags=[
+            {
+                "name": "Authentication",
+                "description": "Endpoints for user registration and JWT login."
+            },
+            {
+                "name": "Users",
+                "description": "CRUD operations for user accounts (requires authentication with Bearer token)."
+            },
+            {
+                "name": "Health",
+                "description": "Server health check endpoint."
+            }
+        ]
+    )
+    # Add Bearer token authentication globally for OpenAPI
+    openapi_schema.setdefault("components", {}).setdefault("securitySchemes", {})
+    openapi_schema["components"]["securitySchemes"]["BearerAuth"] = {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+    }
+    # Add security requirement to all paths except /register, /login, /health
+    for path, methods in openapi_schema.get("paths", {}).items():
+        for method, details in methods.items():
+            if path not in ["/register", "/login", "/health"]:
+                details.setdefault("security", []).append({"BearerAuth": []})
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
 
 if __name__ == "__main__":
     import uvicorn
