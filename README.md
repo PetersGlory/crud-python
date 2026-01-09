@@ -1,31 +1,33 @@
-# 📦 crud-python
+# 🚀 crud-python (FastAPI)
 
-**CRUD Python API** — A simple and extensible Python backend that implements Create, Read, Update, and Delete (CRUD) operations.  
-Designed as a learning project and a solid starter template for RESTful backend services.
-
----
-
-## 🚀 Features
-
-- RESTful API with full CRUD functionality
-- JWT-based authentication
-- PostgreSQL database integration
-- Environment-based configuration
-- Docker & Docker Compose support
-- Clean, modular project structure
+A **FastAPI-based CRUD API** implementing Create, Read, Update, and Delete operations with authentication and PostgreSQL.
+This project serves as a clean starter template for building production-ready RESTful APIs using **FastAPI**.
 
 ---
 
-## 📁 Project Structure
+## ✨ Features
+
+- ⚡ FastAPI (high-performance async API)
+- 🧱 Clean CRUD architecture
+- 🔐 JWT authentication
+- 🐘 PostgreSQL database
+- 📦 Pydantic schemas for validation
+- 🔁 SQLAlchemy ORM
+- 🐳 Docker & Docker Compose support
+- 📖 Automatic Swagger & ReDoc documentation
+
+---
+
+## 🗂️ Project Structure
 
 ```text
 crud-python/
 ├── .env.example
-├── auth.py
-├── database.py
-├── main.py
-├── models.py
-├── schemas.py
+├── auth.py              # Authentication logic (JWT)
+├── database.py          # DB connection & session
+├── models.py            # SQLAlchemy models
+├── schemas.py           # Pydantic schemas
+├── main.py              # FastAPI app entry point
 ├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
@@ -36,18 +38,16 @@ crud-python/
 
 ## 🧠 Prerequisites
 
-Make sure you have the following installed:
-
-- Python 3.9+
+- Python **3.9+**
 - pip
-- PostgreSQL (for local setup)
-- Docker & Docker Compose (optional but recommended)
+- PostgreSQL
+- Docker & Docker Compose (optional)
 
 ---
 
-## ⚙️ Local Setup
+## ⚙️ Local Development Setup
 
-### 1. Clone the Repository
+### 1️⃣ Clone the Repository
 
 ```bash
 git clone https://github.com/PetersGlory/crud-python.git
@@ -56,16 +56,14 @@ cd crud-python
 
 ---
 
-### 2. Create a Virtual Environment
+### 2️⃣ Create & Activate Virtual Environment
 
 ```bash
 python -m venv .venv
 ```
 
-Activate it:
-
 ```bash
-# macOS / Linux
+# Linux / macOS
 source .venv/bin/activate
 
 # Windows
@@ -74,7 +72,7 @@ source .venv/bin/activate
 
 ---
 
-### 3. Install Dependencies
+### 3️⃣ Install Dependencies
 
 ```bash
 pip install -r requirements.txt
@@ -82,17 +80,17 @@ pip install -r requirements.txt
 
 ---
 
-### 4. Configure Environment Variables
+### 4️⃣ Configure Environment Variables
 
-Copy the example environment file:
+Copy the example file:
 
 ```bash
 cp .env.example .env
 ```
 
-Update `.env` with your database and secret values:
+Update `.env`:
 
-```
+```env
 DB_HOST=localhost
 DB_PORT=5432
 DB_USER=postgres
@@ -105,23 +103,23 @@ JWT_SECRET=your-secret-key
 
 ## 🐘 Database Setup
 
-Create the PostgreSQL database:
+Create the database manually:
 
 ```sql
 CREATE DATABASE crud_db;
 ```
 
-Ensure PostgreSQL is running before starting the app.
+Ensure PostgreSQL is running before starting the API.
 
 ---
 
-## ▶️ Run the Application
+## ▶️ Run FastAPI Application
 
 ```bash
-python main.py
+uvicorn main:app --reload
 ```
 
-The API will be available at:
+API runs at:
 
 ```
 http://localhost:8000
@@ -129,63 +127,76 @@ http://localhost:8000
 
 ---
 
-## 🚢 Docker Setup (Recommended)
+## 📘 API Documentation (FastAPI Built‑in)
 
-This project includes Docker support for easy setup.
+FastAPI automatically generates interactive API docs:
 
-### Build and Run Containers
+- Swagger UI → http://localhost:8000/docs
+- ReDoc → http://localhost:8000/redoc
+
+---
+
+## 🐳 Docker Setup (Recommended)
+
+### Build & Run Containers
 
 ```bash
 docker compose up --build
 ```
 
-This will start:
-- PostgreSQL database container
-- Python API container
+Services started:
+- FastAPI application
+- PostgreSQL database
 
 ---
 
-## 📌 API Endpoints
+## 🔌 API Endpoints
 
+### Auth
 | Method | Endpoint | Description |
 |------|--------|------------|
-| GET | `/users` | Fetch all users |
-| GET | `/users/{id}` | Fetch user by ID |
-| POST | `/users` | Create a new user |
-| PUT | `/users/{id}` | Update a user |
-| DELETE | `/users/{id}` | Delete a user |
 | POST | `/auth/register` | Register user |
-| POST | `/auth/login` | Login and receive JWT |
+| POST | `/auth/login` | Login & receive JWT |
+
+### Users
+| Method | Endpoint | Description |
+|------|--------|------------|
+| GET | `/users` | Get all users |
+| GET | `/users/{id}` | Get user by ID |
+| POST | `/users` | Create user |
+| PUT | `/users/{id}` | Update user |
+| DELETE | `/users/{id}` | Delete user |
 
 ---
 
-## 🔐 Authentication
-
-The API uses JWT for authentication.
+## 🔐 Authentication Usage
 
 1. Login via `/auth/login`
-2. Receive a token
-3. Use it in requests:
+2. Copy the JWT token
+3. Add to request headers:
 
-```
-Authorization: Bearer <TOKEN>
+```http
+Authorization: Bearer <YOUR_TOKEN>
 ```
 
 ---
 
-## 🧪 Example Request
-
-### Create User
+## 🧪 Sample Request
 
 ```bash
 curl -X POST http://localhost:8000/users \
+-H "Authorization: Bearer <TOKEN>" \
 -H "Content-Type: application/json" \
--d '{"username":"john","email":"john@example.com","password":"secret"}'
+-d '{
+  "username": "john",
+  "email": "john@example.com",
+  "password": "secret"
+}'
 ```
 
 ---
 
-## 🧹 Stop & Clean Docker Containers
+## 🛑 Stop Containers
 
 ```bash
 docker compose down -v
@@ -195,11 +206,11 @@ docker compose down -v
 
 ## 🤝 Contributing
 
-Pull requests and issues are welcome.  
-Feel free to fork and improve the project.
+Contributions are welcome.
+Open an issue or submit a pull request.
 
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License.
+MIT License © PetersGlory
