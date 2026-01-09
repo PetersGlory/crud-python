@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: crud_python_db
+    environment:
+      POSTGRES_USER: ${DB_USER:-crud_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-crud_password}
+      POSTGRES_DB: ${DB_NAME:-crud_db}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-crud_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crud_network
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: crud_python_app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-crud_user}:${DB_PASSWORD:-crud_password}@db:5432/${DB_NAME:-crud_db}
+      PYTHONUNBUFFERED: 1
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    networks:
+      - crud_network
+
+volumes:
+  postgres_data:
+
+networks:
+  crud_network:
+    driver: bridge
